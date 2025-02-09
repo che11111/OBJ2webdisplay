@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多模型查看器</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        
+        /* 控制面板样式 */
+        #control-panel {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            transition: all 0.3s ease;
+            z-index: 100;
+            min-width: 180px;
+        }
+        
+        .panel-header {
+            padding: 12px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .panel-content {
+            padding: 10px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .collapsed .panel-content {
+            display: none;
+        }
+        
+        .model-btn {
+            display: flex;
+            align-items: center;
+            width: 100%;
+            padding: 8px 12px;
+            margin: 4px 0;
+            border: none;
+            background: #f0f0f0;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+        }
+        
+        .model-btn.active {
+            background: #ffcccc !important;
+            color: #cc0000;
+        }
+        
+        .model-btn:hover {
+            background: #e0e0e0;
+        }
+        
+        /* 加载动画 */
+        .loader {
+            width: 18px;
+            height: 18px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+            display: none;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        #loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 16px 24px;
+            border-radius: 8px;
+            display: none;
+            align-items: center;
+        }
+        
+        .progress-bar {
+            width: 200px;
+            height: 4px;
+            background: #555;
+            margin-top: 8px;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            width: 0%;
+            height: 100%;
+            background: #4CAF50;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div id="control-panel">
+        <div class="panel-header" onclick="togglePanel()">
+            <span>选择模型</span>
+            <span id="toggle-icon">▼</span>
+        </div>
+        <div class="panel-content">
+            <!-- 模型按钮动态生成 -->
+        </div>
+    </div>
+    
+    <div id="loading">
+        <div class="loader"></div>
+        <div>
+            <span>加载中...</span>
+            <div class="progress-bar">
+                <div class="progress-fill"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js"></script>
+
+    <script>
+        // 基础配置
+        const modelConfig = {
+            models: {
+                'example': '示例模型',
+                // 'model-1 (文件夹名)': 'model-1 (显示名称)',
+                // 'model-2 (文件夹名)': 'model-2 (显示名称)',
+
+            },
+            currentModel: null
+        };
+
+        // 初始化Three.js组件
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xeeeeee);
+        
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // 初始化控制器
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // 初始化光源
+        initLights();
+        
+        // 生成模型选择按钮
+        initModelSelector();
+
+        // 加载初始模型
+        loadModel('example');
+
+        // 控制面板功能
+        function togglePanel() {
+            const panel = document.getElementById('control-panel');
+            const icon = document.getElementById('toggle-icon');
+            panel.classList.toggle('collapsed');
+            icon.textContent = panel.classList.contains('collapsed') ? '▶' : '▼';
+        }
+
+        // 初始化光源
+        function initLights() {
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(2, 2, 3);
+            scene.add(directionalLight);
+        }
+
+        // 初始化模型选择器
+        function initModelSelector() {
+            const container = document.querySelector('.panel-content');
+            Object.entries(modelConfig.models).forEach(([folder, name]) => {
+                const btn = document.createElement('button');
+                btn.className = 'model-btn';
+                btn.innerHTML = `
+                    <div class="loader"></div>
+                    <span>${name}</span>
+                `;
+                btn.dataset.folder = folder;
+                btn.onclick = () => loadModel(folder);
+                container.appendChild(btn);
+            });
+        }
+
+        // 模型加载函数
+        function loadModel(folder) {
+            if(modelConfig.currentModel === folder) return;
+            
+            // 更新按钮状态
+            document.querySelectorAll('.model-btn').forEach(btn => {
+                btn.classList.remove('active');
+                btn.querySelector('.loader').style.display = 'none';
+            });
+            const activeBtn = document.querySelector(`[data-folder="${folder}"]`);
+            activeBtn.classList.add('active');
+            activeBtn.querySelector('.loader').style.display = 'block';
+
+            showLoading(true);
+            clearScene();
+
+            const basePath = `obj/${folder}/`;
+            
+            // 加载进度跟踪
+            let progress = 0;
+            updateProgress(0);
+
+            // 加载材质
+            new THREE.MTLLoader()
+                .setPath(basePath)
+                .load('textured_output.mtl', 
+                    materials => {
+                        materials.preload();
+                        // 加载模型
+                        new THREE.OBJLoader()
+                            .setMaterials(materials)
+                            .setPath(basePath)
+                            .load(
+                                'textured_output.obj',
+                                object => {
+                                    scene.add(object);
+                                    centerModel(object);
+                                    modelConfig.currentModel = folder;
+                                    showLoading(false);
+                                    activeBtn.classList.remove('active');
+                                    activeBtn.querySelector('.loader').style.display = 'none';
+                                },
+                                xhr => {
+                                    updateProgress(0.5 + (xhr.loaded / xhr.total) * 0.5);
+                                },
+                                error => {
+                                    console.error('加载失败:', error);
+                                    showLoading(false, true);
+                                    activeBtn.classList.remove('active');
+                                    activeBtn.querySelector('.loader').style.display = 'none';
+                                }
+                            );
+                    },
+                    xhr => {
+                        updateProgress((xhr.loaded / xhr.total) * 0.5);
+                    },
+                    error => {
+                        console.error('材质加载失败:', error);
+                        showLoading(false, true);
+                    }
+                );
+        }
+
+        // 更新进度条
+        function updateProgress(percentage) {
+            document.querySelector('.progress-fill').style.width = 
+                Math.round(percentage * 100) + '%';
+        }
+
+        // 场景清理
+        function clearScene() {
+            scene.children.slice().forEach(child => {
+                if(child.type === 'Group' || child.type === 'Mesh') {
+                    scene.remove(child);
+                }
+            });
+        }
+
+        // 模型居中
+        function centerModel(object) {
+            const box = new THREE.Box3().setFromObject(object);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            
+            object.position.sub(center);
+            controls.target.copy(center);
+            controls.update();
+            
+            // 自动调整相机距离
+            const maxDim = Math.max(size.x, size.y, size.z);
+            camera.position.z = maxDim * 1.5;
+        }
+
+        // 加载状态管理
+        function showLoading(show, isError) {
+            const loading = document.getElementById('loading');
+            loading.style.display = show ? 'flex' : 'none';
+            loading.querySelector('span').textContent = isError ? '加载失败' : '加载中...';
+            loading.querySelector('.loader').style.display = show ? 'block' : 'none';
+        }
+
+        // 窗口响应
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // 动画循环
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
