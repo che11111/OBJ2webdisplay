@@ -23,4 +23,4 @@ place the `textured_output.obj` file, `textured_output.mtl` file, and correspond
 
 You need to name both the obj file and the mtl file of the model as `textured_output`
 
-Otherwise, you need to change the code in the Html. 
+Otherwise, you need to change the code in the html. 
